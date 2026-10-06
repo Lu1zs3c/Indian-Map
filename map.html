@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>India Avalanche Prone Areas Map</title>
+    <!-- Load Tailwind CSS for styling UI elements -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <!-- Load TopoJSON library -->
+    <script src="https://unpkg.com/topojson-client@3"></script>
+    <style>
+        .state {
+            stroke: #ffffff;
+            stroke-width: 1px;
+            transition: fill 0.2s ease, opacity 0.2s ease;
+            cursor: pointer;
+        }
+        .state:hover {
+            opacity: 0.85;
+            stroke: #1e293b;
+            stroke-width: 1.5px;
+        }
+        #tooltip {
+            pointer-events: none;
+            transition: opacity 0.15s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen flex flex-col items-center justify-between p-4 md:p-8">
+
+    <!-- Header -->
+    <header class="w-full max-w-5xl mb-6 text-center">
+        <h1 class="text-2xl md:text-3xl font-bold tracking-tight text-slate-900">India Avalanche Prone Areas</h1>
+        <p class="text-sm md:text-base text-slate-600 mt-1">Interactive vulnerability map highlighting high-risk Himalayan states and union territories.</p>
+    </header>
+
+    <!-- Main Container with Map and Sidebar/Legend -->
+    <main class="w-full max-w-5xl bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden flex flex-col md:flex-row relative">
+        
+        <!-- Map Viewport -->
+        <div id="map-container" class="relative w-full md:w-3/5 h-[450px] md:h-[600px] bg-slate-900 flex items-center justify-center overflow-hidden">
+            <!-- Loading indicator -->
+            <div id="loading" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 text-white z-20">
+                <svg class="animate-spin h-8 w-8 text-sky-400 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="text-sm font-medium">Loading geographic data...</p>
+            </div>
+            
+            <!-- SVG Canvas -->
+            <svg id="map" class="w-full h-full"></svg>
+
+            <!-- Floating Tooltip -->
+            <div id="tooltip" class="absolute top-4 left-4 bg-slate-900/95 text-white p-3 rounded-lg shadow-xl text-xs max-w-xs opacity-0 z-30 border border-slate-700 backdrop-blur-sm">
+                <p id="tooltip-title" class="font-bold text-sm text-sky-400 mb-1"></p>
+                <p id="tooltip-risk" class="font-semibold mb-1"></p>
+                <p id="tooltip-desc" class="text-slate-300"></p>
+            </div>
+        </div>
+
+        <!-- Information & Legend Sidebar -->
+        <div class="w-full md:w-2/5 p-6 flex flex-col justify-between bg-white border-t md:border-t-0 md:border-l border-slate-200">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-900 mb-3">Vulnerability Index</h2>
+                
+                <!-- Legend -->
+                <div class="space-y-3 mb-6">
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-red-50 border border-red-100">
+                        <div class="w-4 h-4 rounded bg-red-600 mt-0.5 shrink-0"></div>
+                        <div>
+                            <span class="block font-semibold text-red-900 text-sm">High Risk Zone</span>
+                            <span class="text-xs text-red-700">Steep slopes, heavy snowfall, frequent avalanches affecting high-altitude passages and settlements.</span>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                        <div class="w-4 h-4 rounded bg-slate-300 mt-0.5 shrink-0"></div>
+                        <div>
+                            <span class="block font-semibold text-slate-700 text-sm">Low / No Avalanche Risk</span>
+                            <span class="text-xs text-slate-500">Regions outside the Himalayan high-altitude belt with minimal or negligible natural snow slide hazards.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-4">
+                    <h3 class="text-sm font-semibold text-slate-800 mb-2">Instructions</h3>
+                    <p class="text-xs text-slate-600 leading-relaxed">
+                        Hover over any state or union territory on the map to inspect specific vulnerable regions, districts, and terrain conditions prone to avalanches.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Dynamic Selected State Detail Card -->
+            <div id="selection-card" class="mt-6 p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                <p class="font-semibold text-slate-500 uppercase tracking-wider mb-1">Active Selection</p>
+                <p id="selected-state-name" class="font-bold text-slate-900 text-sm">Hover over a region</p>
+                <p id="selected-state-details" class="text-slate-600 mt-1">Detailed risk information will appear here.</p>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full max-w-5xl mt-6 text-center text-xs text-slate-500">
+        <p>Interactive Map built with D3.js & TopoJSON | Standardized TopoJSON Source: GitHub / Datamaps India</p>
+    </footer>
+
+    <!-- Map Logic Script -->
+    <script>
+        // Data mapping for high-risk avalanche zones in India
+        const avalancheData = {
+            "Jammu & Kashmir": {
+                risk: "High Risk",
+                color: "#dc2626", // Red-600
+                details: "Frequent winter avalanches in higher reaches of the Kashmir Valley and Gurez valley."
+            },
+            "Ladakh": {
+                risk: "High Risk",
+                color: "#dc2626",
+                details: "Extreme risk due to heavy snow accumulation across Kargil, Drass, and the Siachen Glacier region."
+            },
+            "Himachal Pradesh": {
+                risk: "High Risk",
+                color: "#dc2626",
+                details: "Highly vulnerable districts include Lahaul & Spiti, Kinnaur, Kullu, and Chamba."
+            },
+            "Uttarakhand": {
+                risk: "High Risk",
+                color: "#dc2626",
+                details: "Upper Himalayan regions, particularly Chamoli and Tehri Garhwal districts, frequently experience snow slides."
+            },
+            "Sikkim": {
+                risk: "High Risk",
+                color: "#dc2626",
+                details: "High-altitude mountainous passes and glacial lake zones in northern Sikkim are prone to avalanches."
+            },
+            "Arunachal Pradesh": {
+                risk: "High Risk",
+                color: "#dc2626",
+                details: "Higher elevations along the northern Eastern Himalayas experience seasonal avalanches."
+            }
+        };
+
+        const defaultColor = "#cbd5e1"; // Slate-300
+
+        // Set up SVG container dimensions
+        const container = document.getElementById('map-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        const svg = d3.select("#map")
+            .attr("width", width)
+            .attr("height", height);
+
+        const g = svg.append("g");
+
+        // Set up geographic projection centered on India
+        const projection = d3.geoMercator()
+            .center([82.5, 22.5])
+            .scale(width * 1.15)
+            .translate([width / 2, height / 2]);
+
+        const path = d3.geoPath().projection(projection);
+
+        // Tooltip elements
+        const tooltip = d3.select("#tooltip");
+        const tooltipTitle = document.getElementById("tooltip-title");
+        const tooltipRisk = document.getElementById("tooltip-risk");
+        const tooltipDesc = document.getElementById("tooltip-desc");
+
+        const selectedStateName = document.getElementById("selected-state-name");
+        const selectedStateDetails = document.getElementById("selected-state-details");
+
+        // Load India TopoJSON (Standard public TopoJSON source for India states)
+        const topoJsonUrl = "https://gist.githubusercontent.com/jbrobst/56c13bbbf9d97d187fea01ca62ec5162/raw/e3e31e5f0375d31569e5d483fd343dbff387928d/india_states.json";
+
+        d3.json(topoJsonUrl).then(data => {
+            // Hide loading spinner
+            document.getElementById("loading").style.display = "none";
+
+            // Convert TopoJSON to GeoJSON features
+            // Note: Adjust object key name based on topojson structure ('india سلطنة' or similar standard feature collection)
+            const objectKey = Object.keys(data.objects)[0];
+            const states = topojson.feature(data, data.objects[objectKey]);
+
+            // Draw map paths
+            g.selectAll("path")
+                .data(states.features)
+                .enter()
+                .append("path")
+                .attr("class", "state")
+                .attr("d", path)
+                .attr("fill", d => {
+                    const stateName = d.properties.ST_NM || d.properties.NAME_1 || d.properties.name;
+                    return avalancheData[stateName] ? avalancheData[stateName].color : defaultColor;
+                })
+                .on("mouseover", function(event, d) {
+                    const stateName = d.properties.ST_NM || d.properties.NAME_1 || d.properties.name;
+                    const info = avalancheData[stateName];
+                    
+                    // Update Tooltip content
+                    tooltipTitle.innerText = stateName;
+                    if (info) {
+                        tooltipRisk.innerText = `Status: ${info.risk}`;
+                        tooltipRisk.className = "font-semibold text-red-400 mb-1";
+                        tooltipDesc.innerText = info.details;
+                    } else {
+                        tooltipRisk.innerText = "Status: Low / No Risk";
+                        tooltipRisk.className = "font-semibold text-slate-400 mb-1";
+                        tooltipDesc.innerText = "No significant historical avalanche hazard reported in this region.";
+                    }
+
+                    // Update Sidebar Card
+                    selectedStateName.innerText = stateName;
+                    selectedStateDetails.innerText = info ? info.details : "No significant avalanche risk recorded for this region.";
+
+                    // Show tooltip
+                    tooltip.style("opacity", 1);
+                })
+                .on("mousemove", function(event) {
+                    // Position tooltip near cursor relative to container
+                    const [x, y] = d3.pointer(event, container);
+                    tooltip.style("left", (x + 15) + "px")
+                           .style("top", (y - 15) + "px");
+                })
+                .on("mouseout", function() {
+                    tooltip.style("opacity", 0);
+                });
+
+        }).catch(error => {
+            console.error("Error loading map data:", error);
+            document.getElementById("loading").innerHTML = `
+                <p class="text-red-400 font-semibold mb-1">Failed to load map data.</p>
+                <p class="text-xs text-slate-400">Please check your internet connection or CORS settings.</p>
+            `;
+        });
+
+        // Responsive resize listener
+        window.addEventListener("resize", () => {
+            const newWidth = container.clientWidth;
+            const newHeight = container.clientHeight;
+            svg.attr("width", newWidth).attr("height", newHeight);
+            projection.scale(newWidth * 1.15).translate([newWidth / 2, newHeight / 2]);
+            g.selectAll("path").attr("d", path);
+        });
+    </script>
+</body>
+</html>
